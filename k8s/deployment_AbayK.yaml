@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-app-abayk
+  labels:
+    app: todo-abayk
+    author: abayk
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: todo-abayk
+  template:
+    metadata:
+      labels:
+        app: todo-abayk
+        author: abayk
+    spec:
+      containers:
+        - name: todo-app
+          image: abayk/todo-app:1.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "postgres"
+            - name: APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-config-abayk
+                  key: app.name
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-config-abayk
+                  key: server.port
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-config-abayk
+                  key: database.host
+            - name: DATABASE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-config-abayk
+                  key: database.port
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-config-abayk
+                  key: database.name
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secret-abayk
+                  key: database.user
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secret-abayk
+                  key: database.password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

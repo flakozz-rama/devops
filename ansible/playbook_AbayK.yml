@@ -1,0 +1,220 @@
+---
+- name: DevOps Environment Setup - AbayK
+  hosts: devops-server
+  become: yes
+  vars:
+    docker_version: "latest"
+    kubectl_version: "1.28.0"
+    minikube_version: "latest"
+    jenkins_version: "latest"
+    app_namespace: "todo-app"
+    k8s_manifests_path: "/home/{{ ansible_user }}/k8s"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+    - name: Verify kubectl installation
+      command: kubectl version --client
+      register: kubectl_version_output
+      changed_when: false
+
+    - name: Display kubectl version
+      debug:
+        var: kubectl_version_output.stdout_lines
+
+    - name: Download Minikube binary
+      get_url:
+        url: https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        dest: /usr/local/bin/minikube
+        mode: '0755'
+
+    - name: Verify Minikube installation
+      command: minikube version
+      register: minikube_version_output
+      changed_when: false
+
+    - name: Display Minikube version
+      debug:
+        var: minikube_version_output.stdout_lines
+
+    - name: Add Jenkins GPG key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: "deb https://pkg.jenkins.io/debian-stable binary/"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Java (required for Jenkins)
+      apt:
+        name: openjdk-17-jdk
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Add Jenkins user to docker group
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+      notify: Restart Jenkins
+
+    - name: Create k8s manifests directory
+      file:
+        path: "{{ k8s_manifests_path }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy ConfigMap manifest
+      copy:
+        src: ../k8s/configmap_AbayK.yaml
+        dest: "{{ k8s_manifests_path }}/configmap_AbayK.yaml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Copy Secret manifest
+      copy:
+        src: ../k8s/secret_AbayK.yaml
+        dest: "{{ k8s_manifests_path }}/secret_AbayK.yaml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+
+    - name: Copy Deployment manifest
+      copy:
+        src: ../k8s/deployment_AbayK.yaml
+        dest: "{{ k8s_manifests_path }}/deployment_AbayK.yaml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Copy Service manifest
+      copy:
+        src: ../k8s/service_AbayK.yaml
+        dest: "{{ k8s_manifests_path }}/service_AbayK.yaml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Copy HPA manifest
+      copy:
+        src: ../k8s/hpa_AbayK.yaml
+        dest: "{{ k8s_manifests_path }}/hpa_AbayK.yaml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Create application namespace
+      command: kubectl create namespace {{ app_namespace }}
+      register: namespace_result
+      changed_when: namespace_result.rc == 0
+      failed_when: namespace_result.rc != 0 and 'already exists' not in namespace_result.stderr
+
+    - name: Deploy ConfigMap
+      command: kubectl apply -f {{ k8s_manifests_path }}/configmap_AbayK.yaml -n {{ app_namespace }}
+
+    - name: Deploy Secret
+      command: kubectl apply -f {{ k8s_manifests_path }}/secret_AbayK.yaml -n {{ app_namespace }}
+
+    - name: Deploy Application
+      command: kubectl apply -f {{ k8s_manifests_path }}/deployment_AbayK.yaml -n {{ app_namespace }}
+
+    - name: Deploy Service
+      command: kubectl apply -f {{ k8s_manifests_path }}/service_AbayK.yaml -n {{ app_namespace }}
+
+    - name: Deploy HPA
+      command: kubectl apply -f {{ k8s_manifests_path }}/hpa_AbayK.yaml -n {{ app_namespace }}
+
+    - name: Wait for deployment to be ready
+      command: kubectl rollout status deployment/todo-app-abayk -n {{ app_namespace }} --timeout=120s
+      register: rollout_status
+      changed_when: false
+
+    - name: Display deployment status
+      debug:
+        var: rollout_status.stdout_lines
+
+  handlers:
+    - name: Restart Jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted

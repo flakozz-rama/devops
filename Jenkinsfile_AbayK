@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = 'abayk/todo-app'
+        DOCKER_TAG = '1.0'
+        REGISTRY_CREDENTIALS = 'docker-hub-credentials'
+    }
+
+    tools {
+        maven 'Maven-3.9'
+        jdk 'JDK-17'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+            post {
+                success {
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Code Quality') {
+            steps {
+                sh 'mvn verify'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh "docker build -f Dockerfile_AbayK -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh 'kubectl apply -f k8s/configmap_AbayK.yaml'
+                sh 'kubectl apply -f k8s/secret_AbayK.yaml'
+                sh 'kubectl apply -f k8s/deployment_AbayK.yaml'
+                sh 'kubectl apply -f k8s/service_AbayK.yaml'
+                sh 'kubectl apply -f k8s/hpa_AbayK.yaml'
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh 'kubectl rollout status deployment/todo-app-abayk'
+                sh 'kubectl get pods -l app=todo-abayk'
+                sh 'kubectl get svc todo-service-abayk'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}

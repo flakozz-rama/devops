@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todo-config-abayk
+  labels:
+    app: todo-abayk
+    author: abayk
+data:
+  app.name: "ToDo App by AbayK"
+  server.port: "8080"
+  database.host: "postgres-service"
+  database.port: "5432"
+  database.name: "todo"
